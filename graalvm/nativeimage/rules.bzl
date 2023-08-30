@@ -36,6 +36,7 @@ _native_image = rule(
     }),
     executable = True,
     fragments = [
+        "apple",
         "cpp",
         "java",
         "platform",
@@ -57,7 +58,7 @@ def native_image(name, **kwargs):
         }),
         enable_default_shell_env = select({
             "@bazel_tools//src/conditions:windows": True,
-            "//conditions:default": True,
+            "//conditions:default": False,
         }),
         check_toolchains = select({
             "@bazel_tools//src/conditions:windows": True,

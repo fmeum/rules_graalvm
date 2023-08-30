@@ -1,6 +1,10 @@
 "Rules for building native binaries using the GraalVM `native-image` tool."
 
 load(
+    "@bazel_skylib//lib:dicts.bzl",
+    "dicts",
+)
+load(
     "@bazel_skylib//lib:paths.bzl",
     "paths",
 )
@@ -15,12 +19,17 @@ load(
     "CPP_LINK_STATIC_LIBRARY_ACTION_NAME",
     "C_COMPILE_ACTION_NAME",
 )
+load(
+    "@build_bazel_apple_support//lib:apple_support.bzl",
+    "apple_support",
+)
 
 _RULES_REPO = "@rules_graalvm"
 _DEFAULT_GVM_REPO = "@graalvm"
 _GVM_TOOLCHAIN_TYPE = "%s//graalvm/toolchain" % _RULES_REPO
 _BAZEL_CPP_TOOLCHAIN_TYPE = "@bazel_tools//tools/cpp:toolchain_type"
 _BAZEL_CURRENT_CPP_TOOLCHAIN = "@bazel_tools//tools/cpp:current_cc_toolchain"
+_MACOS_CONSTRAINT = "@platforms//os:macos"
 _WINDOWS_CONSTRAINT = "@platforms//os:windows"
 
 _PASSTHRU_ENV_VARS = [
@@ -28,13 +37,9 @@ _PASSTHRU_ENV_VARS = [
     "LIB",
     "MSVC",
     "VSINSTALLDIR",
-    "SDKROOT",
-    "DEVELOPER_DIR",
-    "BAZEL_USE_CPP_ONLY_TOOLCHAIN",
-    "BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN",
 ]
 
-_NATIVE_IMAGE_ATTRS = {
+_NATIVE_IMAGE_ATTRS = dicts.add({
     "deps": attr.label_list(
         providers = [[JavaInfo]],
         mandatory = True,
@@ -90,10 +95,13 @@ _NATIVE_IMAGE_ATTRS = {
     "_cc_toolchain": attr.label(
         default = Label(_BAZEL_CURRENT_CPP_TOOLCHAIN),
     ),
+    "_macos_constraint": attr.label(
+        default = Label(_MACOS_CONSTRAINT),
+    ),
     "_windows_constraint": attr.label(
         default = Label(_WINDOWS_CONSTRAINT),
     ),
-}
+}, apple_support.action_required_attrs())
 
 def _graal_binary_implementation(ctx):
     graal_attr = ctx.attr.native_image_tool
@@ -182,18 +190,12 @@ def _graal_binary_implementation(ctx):
         # non-unix hosts implies windows, where we should splice the full path
         unix_like = False
 
-    # fix: make sure to include VS install dir on windows, and SDKROOT/DEVELOPER_DIR on macos, but only
-    # when using the non-legacy rules, and only on Bazel greater than 5. otherwise, it appears to overwrite
-    # the env injected normally by Bazel to make Xcode and VS compilation work.
+    # fix: make sure to include VS install dir on windows but only when using the non-legacy rules,
+    # and only on Bazel greater than 5. otherwise, it appears to overwrite the env injected normally
+    # by Bazel to make VS compilation work.
     if (not ctx.attr._legacy_rule):
         for var in _PASSTHRU_ENV_VARS:
-            if var == "DEVELOPER_DIR" and unix_like:
-                # allow bazel to override the developer directory on mac
-                env[var] = apple_common.apple_toolchain().developer_dir()
-            elif var == "SDKROOT" and unix_like:
-                # allow bazel to override the apple SDK root
-                env[var] = apple_common.apple_toolchain().sdk_dir()
-            elif var in ctx.configuration.default_shell_env:
+            if var in ctx.configuration.default_shell_env:
                 env[var] = ctx.configuration.default_shell_env[var]
 
     # seal paths with hack above
@@ -276,9 +278,16 @@ def _graal_binary_implementation(ctx):
     else:
         run_params["inputs"] = classpath_depset
 
-    ctx.actions.run(
-        **run_params
-    )
+    if ctx.target_platform_has_constraint(ctx.attr._macos_constraint[platform_common.ConstraintValueInfo]):
+        apple_support.run(
+            ctx = ctx,
+            xcode_path_resolve_level = apple_support.xcode_path_resolve_level.none,
+            **run_params
+        )
+    else:
+        ctx.actions.run(
+            **run_params
+        )
 
     return [DefaultInfo(
         executable = binary,
