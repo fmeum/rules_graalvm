@@ -40,6 +40,9 @@ _PASSTHRU_ENV_VARS = [
 ]
 
 _NATIVE_IMAGE_ATTRS = dicts.add({
+    "additional_inputs": attr.label_list(
+        allow_files = True,
+    ),
     "deps": attr.label_list(
         providers = [[JavaInfo]],
         mandatory = True,
@@ -128,7 +131,7 @@ def _graal_binary_implementation(ctx):
         all_deps = depset(transitive = [
             classpath_depset,
             gvm_toolchain.gvm_files.files,
-        ])
+        ] + [input[DefaultInfo].files for input in ctx.attr.additional_inputs])
     else:
         # otherwise, use the legacy code path
         graal_inputs, _, _ = ctx.resolve_command(tools = [
@@ -167,7 +170,9 @@ def _graal_binary_implementation(ctx):
         action_name = CPP_LINK_DYNAMIC_LIBRARY_ACTION_NAME,
     )
 
-    env = {}
+    env = {
+        "NATIVE_IMAGE_DEPRECATED_BUILDER_SANITATION": "true",
+    }
     path_set = {}
     tool_paths = [c_compiler_path, ld_executable_path, ld_static_lib_path, ld_dynamic_lib_path]
     for tool_path in tool_paths:
